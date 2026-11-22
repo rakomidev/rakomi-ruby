@@ -1,0 +1,63 @@
+name: Publish to RubyGems (trusted publishing)
+
+# Runs on a version tag v<major>.<minor>.<patch>. Checks that the tag names the version of both gems, builds
+# each gem from the tag commit and pushes it to rubygems.org with a short-lived API key exchanged for the
+# job's GitHub Actions OIDC token (no stored RubyGems credential).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: false
+
+      - name: The tag names the version of both gems
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for GEM in rakomi omniauth-rakomi; do
+            VERSION="$(cd "${GEM}" && ruby -e 'print Gem::Specification.load(ARGV[0]).version' "${GEM}.gemspec")"
+            if [ "v${VERSION}" != "${TAG}" ]; then
+              echo "ERROR: ${GEM} is version ${VERSION}, the tag is ${TAG}"
+              exit 1
+            fi
+          done
+
+      - name: Build the gems
+        run: |
+          set -euo pipefail
+          for GEM in rakomi omniauth-rakomi; do
+            (cd "${GEM}" && gem build "${GEM}.gemspec" --output "${RUNNER_TEMP}/${GEM}.gem")
+          done
+
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+
+      - name: Push the gems
+        run: |
+          set -euo pipefail
+          for GEM in rakomi omniauth-rakomi; do
+            gem push "${RUNNER_TEMP}/${GEM}.gem"
+          done
