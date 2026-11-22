@@ -54,7 +54,7 @@ jobs:
           done
 
       # RubyGems.org creates a new gem from a pending trusted publisher only when the token exchange names the
-      # account that will own it (its ID, shown on that account's Pending Trusted Publishers page); no released
+      # account that will own it as a JSON string (its ID, shown on that account's Pending Trusted Publishers page); no released
       # version of rubygems/configure-rubygems-credentials sends it, so the exchange is done here, once per gem.
       - name: Push the gems
         env:
@@ -65,7 +65,7 @@ jobs:
             JWT="$(curl -fsS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rubygems.org" | jq -r '.value')"
             echo "::add-mask::${JWT}"
-            KEY="$(jq -n --arg jwt "${JWT}" --argjson owner "${RUBYGEMS_OWNER_ID}" '{jwt: $jwt, owner: $owner}' \
+            KEY="$(jq -n --arg jwt "${JWT}" --arg owner "${RUBYGEMS_OWNER_ID}" '{jwt: $jwt, owner: $owner}' \
               | curl -fsS -X POST -H 'content-type: application/json' -H 'accept: application/json' --data-binary @- \
                 https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token | jq -r '.rubygems_api_key')"
             if [ -z "${KEY}" ] || [ "${KEY}" = "null" ]; then
