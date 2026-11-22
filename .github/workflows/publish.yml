@@ -53,11 +53,25 @@ jobs:
             (cd "${GEM}" && gem build "${GEM}.gemspec" --output "${RUNNER_TEMP}/${GEM}.gem")
           done
 
-      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
-
+      # RubyGems.org creates a new gem from a pending trusted publisher only when the token exchange names the
+      # account that will own it (its ID, shown on that account's Pending Trusted Publishers page); no released
+      # version of rubygems/configure-rubygems-credentials sends it, so the exchange is done here, once per gem.
       - name: Push the gems
+        env:
+          RUBYGEMS_OWNER_ID: "256615"
         run: |
           set -euo pipefail
           for GEM in rakomi omniauth-rakomi; do
-            gem push "${RUNNER_TEMP}/${GEM}.gem"
+            JWT="$(curl -fsS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rubygems.org" | jq -r '.value')"
+            echo "::add-mask::${JWT}"
+            KEY="$(jq -n --arg jwt "${JWT}" --argjson owner "${RUBYGEMS_OWNER_ID}" '{jwt: $jwt, owner: $owner}' \
+              | curl -fsS -X POST -H 'content-type: application/json' -H 'accept: application/json' --data-binary @- \
+                https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token | jq -r '.rubygems_api_key')"
+            if [ -z "${KEY}" ] || [ "${KEY}" = "null" ]; then
+              echo "ERROR: RubyGems.org returned no API key for ${GEM}"
+              exit 1
+            fi
+            echo "::add-mask::${KEY}"
+            GEM_HOST_API_KEY="${KEY}" gem push "${RUNNER_TEMP}/${GEM}.gem"
           done
